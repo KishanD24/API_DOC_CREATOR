@@ -1,6 +1,6 @@
 # 🚀 REST API Documentation Generator (Flutter Web)
 
-👉 https://github.com/KishanD24/API_DOC_CREATOR
+👉 https://kishand24.github.io/API_DOC_CREATOR/
 
 A simple and powerful Flutter Web tool that helps developers generate clean and structured REST API documentation in Markdown format.
 
