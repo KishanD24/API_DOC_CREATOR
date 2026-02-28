@@ -1,0 +1,38 @@
+{
+  "info": {
+    "name": "My API Collection",
+    "_postman_id": "12345",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "https://api.example.com" },
+    { "key": "auth_token", "value": "" },
+    { "key": "email", "value": "demo@example.com" }
+  ],
+  "item": [
+    {
+      "name": "Login API",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"123456\"\n}"
+        },
+        "url": "{{base_url}}/login"
+      }
+    },
+    {
+      "name": "Get Users",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{auth_token}}" }
+        ],
+        "url": "{{base_url}}/users"
+      }
+    }
+  ]
+}

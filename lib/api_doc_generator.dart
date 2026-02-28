@@ -1,13 +1,13 @@
 import 'dart:convert';
 import 'dart:io' as io;
-import 'package:button_kit/button_kit.dart';
-import 'package:button_kit/main.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
+// ignore: deprecated_member_use
 import 'dart:html' as html;
-
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dummy_data.dart';
+import 'model/api_data_model.dart';
 
 class ApiDocGenerator extends StatefulWidget {
   const ApiDocGenerator({super.key});
@@ -18,6 +18,7 @@ class ApiDocGenerator extends StatefulWidget {
 
 class _ApiDocGeneratorState extends State<ApiDocGenerator> {
   List<ApiEntry> apis = [ApiEntry(isExpanded: true)];
+  String baseUrl = "https://example.com/api/v1";
 
   @override
   void initState() {
@@ -31,6 +32,7 @@ class _ApiDocGeneratorState extends State<ApiDocGenerator> {
     for (int i = 0; i < apis.length; i++) {
       final api = apis[i];
 
+      buffer.writeln("## BASE_URL: \n${baseUrl}\n");
       buffer.writeln("## ${i + 1}. ${api.title}\n");
       buffer.writeln("**Endpoint:** `${api.endpoint}`\n");
       buffer.writeln("**Method:** `${api.method}`\n");
@@ -43,11 +45,63 @@ class _ApiDocGeneratorState extends State<ApiDocGenerator> {
     return buffer.toString();
   }
 
+  String generatePostmanCollectionJson({
+    required String collectionName,
+    required String baseUrl,
+  }) {
+    final collection = {
+      "info": {
+        "name": collectionName,
+        "schema":
+        "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+      },
+      "variable": [
+        { "key": "base_url", "value": "$baseUrl" },
+      ],
+      "item": apis.map((api) {
+        // FIX: Build complete URL THEN parse
+        final fullUrl = "$baseUrl/${api.endpoint.replaceFirst("/", "")}";
+        final uri = Uri.parse(fullUrl);
+        return {
+          "name": api.title,
+          "request": {
+            "method": api.method.toUpperCase(),
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": api.requestBody,
+              "options": {"raw": {"language": "json"}}
+            },
+            "url": {
+              "raw": "{{base_url}}/${api.endpoint.replaceFirst("/", "")}",
+              "protocol": uri.scheme,
+              "host": uri.host.split("."),
+              "path": uri.pathSegments,
+              // "raw": "{{base_url}}/"+api.endpoint,
+              // "host": _parseHost(api.endpoint),
+              // "path": _parsePath(api.endpoint),
+            }
+          },
+          "response": [
+            {
+              "name": "${api.title} Response",
+              "originalRequest": {},
+              "body": api.responseBody,
+            }
+          ]
+        };
+      }).toList(),
+    };
+    return const JsonEncoder.withIndent("  ").convert(collection);
+  }
+
   // Mobile share
-  Future<void> shareMarkdownMobile(String content) async {
-    final file = io.File('/storage/emulated/0/Download/api_doc.md');
+  Future<void> shareMarkdownMobile(String content,{required String fileExt}) async {
+    final file = io.File('/storage/emulated/0/Download/api_doc.$fileExt');
     await file.writeAsString(content);
-    await Share.shareXFiles([XFile(file.path)], text: "API Documentation");
+    await SharePlus.instance.share(ShareParams(
+      files: [XFile(file.path)], text: "API Documentation"
+    ));
   }
 
   // Web download
@@ -58,6 +112,18 @@ class _ApiDocGeneratorState extends State<ApiDocGenerator> {
 
     html.AnchorElement(href: url)
       ..setAttribute("download", "api_document.md")
+      ..click();
+
+    html.Url.revokeObjectUrl(url);
+  }
+  // Web download (JSON)
+  void downloadJsonWeb(String content) {
+    final bytes = utf8.encode(content);
+    final blob = html.Blob([bytes], 'application/json');
+    final url = html.Url.createObjectUrlFromBlob(blob);
+
+    html.AnchorElement(href: url)
+      ..setAttribute("download", "api_doc_collection.json")
       ..click();
 
     html.Url.revokeObjectUrl(url);
@@ -76,7 +142,42 @@ class _ApiDocGeneratorState extends State<ApiDocGenerator> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Color.fromARGB(255, 230, 236, 243),
-      appBar: AppBar(title: const Text("REST API Doc Creator"),backgroundColor: Colors.transparent,elevation: 0,),
+      appBar: AppBar(
+        title: GestureDetector(
+          onTap: () {
+            setState(() {
+              apis=dummyDataList;
+            });
+          },
+          child: const Text("REST API Doc Creator")),backgroundColor: Colors.transparent,elevation: 0,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(50),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            width: double.infinity,
+            color: Colors.black12, // light background to differentiate
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                // Base URL Text
+                Expanded(
+                  child: Text(
+                    "Base URL: $baseUrl",
+                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+
+                // Edit Button
+                IconButton(
+                  icon: const Icon(Icons.edit),
+                  onPressed: () => _showEditBaseUrlDialog(context),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
       floatingActionButton: Padding(
         padding: const EdgeInsets.all(24),
         child: Row(
@@ -102,11 +203,24 @@ class _ApiDocGeneratorState extends State<ApiDocGenerator> {
                 if (kIsWeb) {
                   downloadMarkdownWeb(md);
                 } else {
-                  shareMarkdownMobile(md);
+                  shareMarkdownMobile(md, fileExt: 'md');
                 }
               },
               icon: const Icon(Icons.share),
-              label: const Text("Export"),
+              label: const Text("Export Markdown"),
+            ),
+            // EXPORT POSTMAN COLLECTION JSON
+            FloatingActionButton.extended(
+              onPressed: () {
+                String jsonVal = generatePostmanCollectionJson(collectionName: 'API_DOC_COLLECTION', baseUrl: baseUrl);
+                if (kIsWeb) {
+                  downloadJsonWeb(jsonVal);
+                } else {
+                  shareMarkdownMobile(jsonVal, fileExt: 'json');
+                }
+              },
+              icon: const Icon(Icons.share),
+              label: const Text("Export JSON"),
             ),
           ],
         ),
@@ -168,7 +282,7 @@ class _ApiDocGeneratorState extends State<ApiDocGenerator> {
 
           DropdownButtonFormField<String>(
             decoration: const InputDecoration(labelText: "Request Method"),
-            value: api.method,
+            initialValue: api.method,
             borderRadius: BorderRadius.circular(24),
             elevation: 6,
             dropdownColor: Color.fromARGB(255, 230, 236, 243),
@@ -262,59 +376,41 @@ class _ApiDocGeneratorState extends State<ApiDocGenerator> {
     }
   }
 
-}
+  void _showEditBaseUrlDialog(BuildContext context) {
+    final controller = TextEditingController(text: baseUrl);
 
-// --------------------------------------
-// MODEL CLASS WITH CONTROLLERS
-// --------------------------------------
-class ApiEntry {
-  String title;
-  String endpoint;
-  String method;
-  String requestBody;
-  String responseBody;
-  bool isExpanded;
-
-  late TextEditingController titleController;
-  late TextEditingController endpointController;
-  late TextEditingController requestController;
-  late TextEditingController responseController;
-
-  ApiEntry({
-    this.title = "",
-    this.endpoint = "",
-    this.method = "GET",
-    this.requestBody = "{}",
-    this.responseBody = "{}",
-    this.isExpanded = false,
-  }) {
-    titleController = TextEditingController(text: title);
-    endpointController = TextEditingController(text: endpoint);
-    requestController = TextEditingController(text: requestBody);
-    responseController = TextEditingController(text: responseBody);
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      "title": title,
-      "endpoint": endpoint,
-      "method": method,
-      "requestBody": requestBody,
-      "responseBody": responseBody,
-      "isExpanded": isExpanded,
-    };
-  }
-
-  factory ApiEntry.fromJson(Map<String, dynamic> json) {
-    return ApiEntry(
-      title: json["title"] ?? "",
-      endpoint: json["endpoint"] ?? "",
-      method: json["method"] ?? "GET",
-      requestBody: json["requestBody"] ?? "{}",
-      responseBody: json["responseBody"] ?? "{}",
-      isExpanded: json["isExpanded"] ?? false,
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text("Edit Base URL"),
+          content: TextField(
+            controller: controller,
+            decoration: const InputDecoration(
+              labelText: "Base URL",
+              hintText: "https://yourapi.com",
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Cancel"),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                setState(() {
+                  baseUrl = controller.text.trim();
+                });
+                Navigator.pop(context);
+              },
+              child: const Text("Save"),
+            )
+          ],
+        );
+      },
     );
   }
 
 }
+
 
